@@ -612,15 +612,30 @@ export class TextAdventureEngine {
         html.push('<div class="tae-actions">');
         html.push(`<div class="tae-actions-title">${escapeHtml(room.title)}</div>`);
 
-        // Exits
-        const exitItems = (room.exits || []).map(exit => this._renderExit(room.id, exit)).filter(Boolean);
+        // Exits — assign flat-index shorthand labels (m, m1, m2…) to
+        // every exit shown as a real (non-???) link. Hidden exits and
+        // ??? placeholders don't enter the numbering so the indices
+        // visible to the player match what a parser will later see.
+        const visibleExits = (room.exits || []).filter(exit => this._isExitVisibleForShorthand(room.id, exit));
+        const exitItems = (room.exits || []).map(exit => {
+            const idx = visibleExits.indexOf(exit);
+            const shorthand = idx >= 0 ? formatFlatExitShorthand(idx, visibleExits.length) : null;
+            return this._renderExit(room.id, exit, shorthand);
+        }).filter(Boolean);
         if (exitItems.length > 0) {
             html.push('<div class="tae-actions-label">Exits:</div>');
             html.push('<div class="tae-actions-list">' + exitItems.join(' · ') + '</div>');
         }
 
-        // Items
-        const itemEls = (room.items || []).map(item => this._renderItem(room.id, item)).filter(Boolean);
+        // Items — assign location shorthand (l, l1, l2…) to uncollected,
+        // non-??? items only. Collected items keep their label without
+        // a shorthand prefix; ??? placeholders never get shorthand.
+        const visibleItems = (room.items || []).filter(item => this._isItemVisibleForShorthand(room.id, item));
+        const itemEls = (room.items || []).map(item => {
+            const idx = visibleItems.indexOf(item);
+            const shorthand = idx >= 0 ? formatLocationShorthand(idx, visibleItems.length) : null;
+            return this._renderItem(room.id, item, shorthand);
+        }).filter(Boolean);
         if (itemEls.length > 0) {
             html.push('<div class="tae-actions-label">Items:</div>');
             html.push('<div class="tae-actions-list">' + itemEls.join(' · ') + '</div>');
@@ -647,7 +662,22 @@ export class TextAdventureEngine {
         this._queueMessage(room.description || `You are in ${room.title}.`, 'normal');
     }
 
-    _renderExit(roomId, exit) {
+    _isExitVisibleForShorthand(roomId, exit) {
+        const exitSlot = this.state.exits[roomId]?.[exit.id];
+        const exitDiscovered = exitSlot?.discovered ?? false;
+        if (this.options.discoveryMode === 'discovered' && !exitDiscovered) return false;
+        return true;
+    }
+
+    _isItemVisibleForShorthand(roomId, item) {
+        const slot = this.state.items[roomId]?.[item.id];
+        if (!slot) return false;
+        if (slot.collected) return false;
+        if (this.options.discoveryMode === 'discovered' && !slot.discovered) return false;
+        return true;
+    }
+
+    _renderExit(roomId, exit, shorthand) {
         const exitSlot = this.state.exits[roomId]?.[exit.id];
         const accessible = exitSlot?.accessible ?? true;
         const exitDiscovered = exitSlot?.discovered ?? false;
@@ -672,10 +702,11 @@ export class TextAdventureEngine {
 
         const cls = ['tae-link', 'tae-link-exit'];
         cls.push(accessible ? 'tae-link-accessible' : 'tae-link-inaccessible');
-        return `<span class="${cls.join(' ')}" data-room-id="${escapeHtml(roomId)}" data-exit-id="${escapeHtml(exit.id)}">${escapeHtml(label)}</span>`;
+        const prefix = shorthand ? `<span class="tae-shorthand">[${escapeHtml(shorthand)}]</span> ` : '';
+        return `<span class="${cls.join(' ')}" data-room-id="${escapeHtml(roomId)}" data-exit-id="${escapeHtml(exit.id)}">${prefix}${escapeHtml(label)}</span>`;
     }
 
-    _renderItem(roomId, item) {
+    _renderItem(roomId, item, shorthand) {
         const slot = this.state.items[roomId]?.[item.id];
         if (!slot) return null;
         if (this.options.discoveryMode === 'discovered' && !slot.discovered && !slot.collected) {
@@ -688,7 +719,8 @@ export class TextAdventureEngine {
         if (slot.collected) cls.push('tae-link-collected');
         else if (!slot.accessible) cls.push('tae-link-inaccessible');
         else cls.push('tae-link-accessible');
-        return `<span class="${cls.join(' ')}" data-room-id="${escapeHtml(roomId)}" data-item-id="${escapeHtml(item.id)}">${escapeHtml(item.label)}</span>`;
+        const prefix = shorthand ? `<span class="tae-shorthand">[${escapeHtml(shorthand)}]</span> ` : '';
+        return `<span class="${cls.join(' ')}" data-room-id="${escapeHtml(roomId)}" data-item-id="${escapeHtml(item.id)}">${prefix}${escapeHtml(item.label)}</span>`;
     }
 
     _renderInventory() {
@@ -710,4 +742,17 @@ function escapeHtml(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[c]));
+}
+
+// Shorthand for the i-th exit in the flat list. Drops the digit when
+// there's only one exit so `[m]` reads cleaner than `[m1]`.
+function formatFlatExitShorthand(i, total) {
+    if (total <= 1) return 'm';
+    return `m${i + 1}`;
+}
+
+// Shorthand for the i-th uncollected item. Same digit-dropping rule.
+function formatLocationShorthand(i, total) {
+    if (total <= 1) return 'l';
+    return `l${i + 1}`;
 }

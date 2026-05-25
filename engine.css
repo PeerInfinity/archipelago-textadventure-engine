@@ -152,6 +152,12 @@
 .tae-link-explore      { color: #d4af37; font-weight: bold; }
 .tae-link-unknown      { color: #999; font-style: italic; }
 
+.tae-shorthand {
+    color: #888;
+    text-decoration: none;
+    font-weight: bold;
+}
+
 .tae-actions-explore {
     margin-top: 6px;
 }
