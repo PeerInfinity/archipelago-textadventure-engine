@@ -715,6 +715,14 @@ export class TextAdventureEngine {
     }
 
     _render() {
+        // Preserve scrollback position across re-renders. If the user
+        // scrolled up to read older messages, keep them there; only
+        // auto-scroll to the bottom when they were already pinned to
+        // the bottom (within a few px to tolerate sub-pixel layout).
+        const stickToBottom = this._displayEl
+            ? (this._displayEl.scrollHeight - this._displayEl.scrollTop - this._displayEl.clientHeight) < 8
+            : true;
+
         if (!this.world || !this.state.currentRoomId) {
             this._displayEl.innerHTML = '<div class="tae-placeholder">No world loaded.</div>';
             this._renderInventory();
@@ -791,7 +799,9 @@ export class TextAdventureEngine {
         html.push('</div>');
 
         this._displayEl.innerHTML = html.join('');
-        this._displayEl.scrollTop = this._displayEl.scrollHeight;
+        if (stickToBottom) {
+            this._displayEl.scrollTop = this._displayEl.scrollHeight;
+        }
         this._renderInventory();
     }
 
