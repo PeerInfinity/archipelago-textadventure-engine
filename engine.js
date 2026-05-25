@@ -119,9 +119,16 @@ export class TextAdventureEngine {
             this._queueRender();
             return;
         }
+        const isNewRoom = this.state.currentRoomId !== roomId;
         this.state.currentRoomId = roomId;
         this.state.rooms[roomId].discovered = true;
         this._queueRender();
+        // Refocus the command input on each new-room entry so the
+        // player can immediately type a command without clicking. Gated
+        // by autoFocusCommandInput so hosts that own focus elsewhere
+        // (e.g. a tab system that activates a different panel) can
+        // disable it.
+        if (isNewRoom) this._maybeFocus();
     }
 
     setRoomDiscovered(roomId, value) {
@@ -381,6 +388,16 @@ export class TextAdventureEngine {
 
     focus() {
         this._input?.focus();
+    }
+
+    /**
+     * Focus the command input only when autoFocusCommandInput is on.
+     * Used by hosts that want to refocus on panel activation /
+     * region change but should respect the user's setting (which
+     * may disable auto-focus to keep focus on another panel).
+     */
+    maybeFocus() {
+        this._maybeFocus();
     }
 
     destroy() {
@@ -850,8 +867,18 @@ export class TextAdventureEngine {
         // Items — assign location shorthand (l, l1, l2…) to uncollected,
         // non-??? items only. Collected items keep their label without
         // a shorthand prefix; ??? placeholders never get shorthand.
-        const visibleItems = (room.items || []).filter(item => this._isItemVisibleForShorthand(room.id, item));
-        const itemEls = (room.items || []).map(item => {
+        //
+        // Managed mode drops collected items from the action list
+        // entirely (wrapper-driven hosts treat collection as "this
+        // location is done, no need to show it again" — matching the
+        // original substrate's "You can search" vs. "Already searched"
+        // split). Standalone keeps them with strikethrough so the
+        // player still sees what they've explored.
+        const candidates = this.options.managed
+            ? (room.items || []).filter(item => !this.state.items[room.id]?.[item.id]?.collected)
+            : (room.items || []);
+        const visibleItems = candidates.filter(item => this._isItemVisibleForShorthand(room.id, item));
+        const itemEls = candidates.map(item => {
             const idx = visibleItems.indexOf(item);
             const shorthand = idx >= 0 ? formatLocationShorthand(idx, visibleItems.length) : null;
             return this._renderItem(room.id, item, shorthand);
