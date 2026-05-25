@@ -13,6 +13,7 @@ const DEFAULT_OPTIONS = Object.freeze({
     discoveryMode: 'full',     // 'full' | 'discovered'
     messageHistoryLimit: 10,
     dataPath: './data',         // relative path to manifest.json + world files
+    autoFocusCommandInput: true, // refocus the input after every action
 });
 
 export class TextAdventureEngine {
@@ -195,6 +196,25 @@ export class TextAdventureEngine {
         this._queueRender();
     }
 
+    /**
+     * Update one of the engine's runtime options. Used by wrappers
+     * pushing host settings across an iframe boundary. Unknown keys
+     * are silently ignored so older engine versions don't break newer
+     * wrappers. Re-renders only when the change actually affects what's
+     * shown.
+     */
+    setOption(key, value) {
+        if (!(key in this.options)) return;
+        if (this.options[key] === value) return;
+        this.options[key] = value;
+        if (key === 'messageHistoryLimit') {
+            if (Number.isFinite(value) && value > 0 && this.messages.length > value) {
+                this.messages = this.messages.slice(-value);
+                this._queueRender();
+            }
+        }
+    }
+
     batchUpdate(fn) {
         this._batchDepth++;
         try {
@@ -339,101 +359,204 @@ export class TextAdventureEngine {
         const text = (rawText || '').trim();
         if (!text) return;
 
-        const lower = text.toLowerCase();
         const room = this.world?.rooms[this.state.currentRoomId];
         if (!room) {
             this._emit('command:custom', { rawCommand: text });
             return;
         }
 
-        // help
-        if (lower === 'help' || lower === '?') {
-            this.displayMessage(
-                'Commands:\n' +
-                '  go <exit> / move <exit>   — travel through an exit\n' +
-                '  examine <item> / look <item>  — examine an item\n' +
-                '  explore / x                — reveal one undiscovered thing\n' +
-                '  look                       — describe current room\n' +
-                '  inventory / inv            — list inventory (shown in sidebar)\n' +
-                '  help                       — this text',
-                'system'
-            );
-            return;
-        }
-
-        // look (re-describe room)
-        if (lower === 'look' || lower === 'l') {
-            this._describeRoom(room, { force: true });
-            return;
-        }
-
-        // explore
-        if (lower === 'explore' || lower === 'x') {
-            this.triggerExplore(room.id, opts);
-            return;
-        }
-
-        // inventory
-        if (lower === 'inventory' || lower === 'inv' || lower === 'i') {
-            const ids = Object.keys(this.state.inventory);
-            if (ids.length === 0) {
-                this.displayMessage('Your inventory is empty.', 'system');
-            } else {
-                const lines = ids.map(id => {
-                    const { count, label } = this.state.inventory[id];
-                    return count > 1 ? `  ${label} ×${count}` : `  ${label}`;
-                });
-                this.displayMessage('Inventory:\n' + lines.join('\n'), 'system');
-            }
-            return;
-        }
-
-        // move / go
-        const moveMatch = lower.match(/^(?:go|move)\s+(.+)$/);
-        if (moveMatch) {
-            const target = moveMatch[1].trim();
-            const exit = this._findExit(room, target);
-            if (!exit) {
-                this.displayMessage(`No such exit: '${target}'.`, 'error');
+        const cmd = this._parseCommand(text, room);
+        switch (cmd.type) {
+            case 'help':
+                this.displayMessage(this._helpText(), 'system');
+                return;
+            case 'inventory': {
+                const ids = Object.keys(this.state.inventory);
+                if (ids.length === 0) {
+                    this.displayMessage('Your inventory is empty.', 'system');
+                } else {
+                    const lines = ids.map(id => {
+                        const { count, label } = this.state.inventory[id];
+                        return count > 1 ? `  ${label} ×${count}` : `  ${label}`;
+                    });
+                    this.displayMessage('Inventory:\n' + lines.join('\n'), 'system');
+                }
                 return;
             }
-            this.triggerExit(room.id, exit.id, opts);
-            return;
-        }
-
-        // examine / look at / check
-        const examMatch = lower.match(/^(?:examine|look at|check|inspect)\s+(.+)$/);
-        if (examMatch) {
-            const target = examMatch[1].trim();
-            const item = this._findItem(room, target);
-            if (!item) {
-                this.displayMessage(`No such item: '${target}'.`, 'error');
+            case 'look':
+                this._describeRoom(room, { force: true });
                 return;
-            }
-            this.triggerExamineItem(room.id, item.id, opts);
-            return;
-        }
-
-        // unknown — emit and surface
-        this._emit('command:custom', { rawCommand: text });
-        if (!this.options.managed) {
-            this.displayMessage(`I don't understand: '${text}'. Type 'help' for commands.`, 'error');
+            case 'explore':
+                this.triggerExplore(room.id, opts);
+                return;
+            case 'move':
+                this.triggerExit(room.id, cmd.exit.id, opts);
+                return;
+            case 'examine':
+                this.triggerExamineItem(room.id, cmd.item.id, opts);
+                return;
+            case 'error':
+                this.displayMessage(cmd.message, 'error');
+                this._emit('command:custom', { rawCommand: text });
+                return;
+            default:
+                this._emit('command:custom', { rawCommand: text });
+                if (!this.options.managed) {
+                    this.displayMessage(`I don't understand: '${text}'. Type 'help' for commands.`, 'error');
+                }
         }
     }
 
-    _findExit(room, target) {
-        const t = target.toLowerCase();
-        // exact id, exact label-prefix, then partial label match
-        return room.exits.find(e => e.id.toLowerCase() === t)
-            || room.exits.find(e => e.label.toLowerCase().startsWith(t))
-            || room.exits.find(e => e.label.toLowerCase().includes(t));
+    /**
+     * Parse user input into a structured command. Three layers, in
+     * order:
+     *   1. Shorthand: `x` → explore; `[neswcml]\d*` → resolve against
+     *      the current room's visible exits/items. Indices match what
+     *      the renderer shows (cell-based when compass layout active,
+     *      flat-m when not; l-based for uncollected items).
+     *   2. Bare verbs: help / ? / inventory / inv / items / look.
+     *   3. Verb + target: move/go/travel/to → exit; check/examine/
+     *      search/inspect → item; look <name> → item (alias).
+     *   4. Bare target with no verb: ambiguity-resolved against the
+     *      same exit and item lists. Exact-match in both → error.
+     *      Otherwise location wins to keep accidental moves rare.
+     */
+    _parseCommand(text, room) {
+        const lower = text.toLowerCase().trim();
+        if (!lower) return { type: 'error', message: 'Please enter a command.' };
+
+        // Layer 1: shorthand.
+        const sh = this._parseShorthand(lower, room);
+        if (sh) return sh;
+
+        // Layer 2: bare verbs.
+        if (HELP_VERBS.includes(lower)) return { type: 'help' };
+        if (INVENTORY_VERBS.includes(lower)) return { type: 'inventory' };
+        if (LOOK_VERBS.includes(lower)) return { type: 'look' };
+
+        // Layer 3: verb + target.
+        const { verb, target } = this._extractVerbAndTarget(lower);
+        if (verb && !target) {
+            return { type: 'error', message: `Unrecognized command. Type 'help' for commands.` };
+        }
+        if (verb) {
+            if (MOVE_VERBS.includes(verb)) {
+                const matches = this._findExitMatches(room, target);
+                if (matches.length === 0) return { type: 'error', message: `Unrecognized exit: ${target}` };
+                return { type: 'move', exit: matches[0].exit };
+            }
+            if (CHECK_VERBS.includes(verb)) {
+                const matches = this._findItemMatches(room, target);
+                if (matches.length === 0) return { type: 'error', message: `Unrecognized item: ${target}` };
+                return { type: 'examine', item: matches[0].item };
+            }
+            if (LOOK_VERBS.includes(verb)) {
+                // "look <name>" treated as examine, matching the original substrate.
+                const matches = this._findItemMatches(room, target);
+                if (matches.length === 0) return { type: 'error', message: `Unrecognized item: ${target}` };
+                return { type: 'examine', item: matches[0].item };
+            }
+            return { type: 'error', message: `Unrecognized command. Type 'help' for commands.` };
+        }
+
+        // Layer 4: bare target, ambiguity-resolved.
+        const itemMatches = this._findItemMatches(room, target ?? lower);
+        const exitMatches = this._findExitMatches(room, target ?? lower);
+        if (itemMatches.length === 0 && exitMatches.length === 0) {
+            return { type: 'error', message: `Unrecognized exit or item: ${target ?? lower}` };
+        }
+        const exactItem = itemMatches.find(m => m.quality === 'exact');
+        const exactExit = exitMatches.find(m => m.quality === 'exact');
+        if (exactItem && exactExit) {
+            return {
+                type: 'error',
+                message: `Ambiguous name '${target ?? lower}'. Did you mean to move or examine?`,
+            };
+        }
+        if (itemMatches.length > 0) return { type: 'examine', item: itemMatches[0].item };
+        return { type: 'move', exit: exitMatches[0].exit };
     }
 
-    _findItem(room, target) {
-        const t = target.toLowerCase();
-        return room.items.find(i => i.id.toLowerCase() === t)
-            || room.items.find(i => i.label.toLowerCase().startsWith(t))
-            || room.items.find(i => i.label.toLowerCase().includes(t));
+    /**
+     * Resolve shorthand against the current room. Returns a command on
+     * a match, null if input isn't a shorthand pattern, or an error
+     * command if it is a shorthand pattern but the index is out of
+     * range.
+     */
+    _parseShorthand(lower, room) {
+        if (EXPLORE_RE.test(lower)) return { type: 'explore' };
+        const m = SHORTHAND_RE.exec(lower);
+        if (!m) return null;
+        const letter = m[1];
+        const digits = m[2];
+        const index = digits === '' ? 1 : Number.parseInt(digits, 10);
+
+        if (letter === 'l') {
+            const items = (room.items || []).filter(it => this._isItemVisibleForShorthand(room.id, it));
+            const item = items[index - 1];
+            if (!item) return { type: 'error', message: `No item ${lower} in this room.` };
+            return { type: 'examine', item };
+        }
+
+        if (letter === 'm') {
+            const exits = (room.exits || []).filter(e => this._isExitVisibleForShorthand(room.id, e));
+            const exit = exits[index - 1];
+            if (!exit) return { type: 'error', message: `No exit ${lower} in this room.` };
+            return { type: 'move', exit };
+        }
+
+        // n / e / s / w / c — cell-based shorthand.
+        const cellId = letter.toUpperCase();
+        const cells = groupExitsBySide(room.exits || []);
+        const visible = (cells[cellId] || []).filter(e => this._isExitVisibleForShorthand(room.id, e));
+        const exit = visible[index - 1];
+        if (!exit) return { type: 'error', message: `No exit ${lower} in this room.` };
+        return { type: 'move', exit };
+    }
+
+    _extractVerbAndTarget(lower) {
+        const words = lower.split(/\s+/);
+        if (words.length === 1) return { verb: null, target: words[0] };
+        const first = words[0];
+        const allVerbs = [...MOVE_VERBS, ...CHECK_VERBS, ...LOOK_VERBS];
+        if (allVerbs.includes(first)) {
+            return { verb: first, target: words.slice(1).join(' ') };
+        }
+        return { verb: null, target: lower };
+    }
+
+    _findExitMatches(room, target) {
+        return findMatches(target, (room.exits || []).map(exit => ({
+            entity: exit,
+            keys: [exit.id, exit.label],
+        }))).map(m => ({ exit: m.entity, quality: m.quality }));
+    }
+
+    _findItemMatches(room, target) {
+        return findMatches(target, (room.items || []).map(item => ({
+            entity: item,
+            keys: [item.id, item.label],
+        }))).map(m => ({ item: m.entity, quality: m.quality }));
+    }
+
+    _helpText() {
+        return [
+            'Commands:',
+            '  go <exit> / move <exit>     — travel through an exit',
+            '  examine <item> / check / search — examine an item',
+            '  look                        — re-describe the current room',
+            '  inventory / inv / items     — list inventory (sidebar)',
+            '  explore / x                 — reveal one undiscovered thing',
+            '  help / ?                    — show this text',
+            '',
+            'Shorthand:',
+            '  n, e, s, w, c               — first exit in that compass cell',
+            '  n1, e2, w3, c1              — Nth exit in that cell',
+            '  m, m1, m2                   — Nth exit (flat list)',
+            '  l, l1, l2                   — Nth uncollected item',
+            '',
+            'You can also just type the bare name of an exit or item.',
+        ].join('\n');
     }
 
     // ─── DOM construction ──────────────────────────────────────────
@@ -474,16 +597,20 @@ export class TextAdventureEngine {
         this._displayEl.addEventListener('click', (e) => {
             const t = e.target;
             if (!(t instanceof HTMLElement)) return;
-            const roomId = t.dataset.roomId;
-            if (t.dataset.exitId) {
-                this.triggerExit(roomId, t.dataset.exitId);
-                this.focus();
-            } else if (t.dataset.itemId) {
-                this.triggerExamineItem(roomId, t.dataset.itemId);
-                this.focus();
-            } else if (t.dataset.action === 'explore') {
+            // Click can land on the shorthand prefix span; walk up to
+            // the clickable link to recover the data attrs.
+            const link = t.closest('[data-exit-id], [data-item-id], [data-action]');
+            if (!link) return;
+            const roomId = link.dataset.roomId;
+            if (link.dataset.exitId) {
+                this.triggerExit(roomId, link.dataset.exitId);
+                this._maybeFocus();
+            } else if (link.dataset.itemId) {
+                this.triggerExamineItem(roomId, link.dataset.itemId);
+                this._maybeFocus();
+            } else if (link.dataset.action === 'explore') {
                 this.triggerExplore(roomId);
-                this.focus();
+                this._maybeFocus();
             }
         });
         this._input.addEventListener('keydown', (e) => {
@@ -495,6 +622,10 @@ export class TextAdventureEngine {
                 this._handleCommand(text);
             });
         });
+    }
+
+    _maybeFocus() {
+        if (this.options.autoFocusCommandInput) this.focus();
     }
 
     async _showInitialView() {
@@ -789,6 +920,40 @@ function formatFlatExitShorthand(i, total) {
 function formatLocationShorthand(i, total) {
     if (total <= 1) return 'l';
     return `l${i + 1}`;
+}
+
+// Verb vocabulary. Same coverage as the original substrate parser so
+// muscle-memory from there carries over.
+const MOVE_VERBS = Object.freeze(['move', 'go', 'travel', 'to']);
+const CHECK_VERBS = Object.freeze(['check', 'examine', 'search', 'inspect']);
+const LOOK_VERBS = Object.freeze(['look']);
+const INVENTORY_VERBS = Object.freeze(['inventory', 'inv', 'items', 'i']);
+const HELP_VERBS = Object.freeze(['help', '?']);
+
+// Shorthand patterns. `x` (no digit) is the explore command and is
+// checked first so it isn't mistaken for an out-of-range exit.
+const EXPLORE_RE = /^x$/;
+const SHORTHAND_RE = /^([neswcml])(\d*)$/;
+
+// Match `target` against a list of {entity, keys} bundles. Each key
+// (id or label) is checked for exact then partial (substring) match.
+// Returns matches sorted exact-first, preserving original order
+// within each quality bucket.
+function findMatches(target, bundles) {
+    if (!target) return [];
+    const t = target.toLowerCase();
+    const out = [];
+    for (const { entity, keys } of bundles) {
+        let quality = null;
+        for (const k of keys) {
+            const kl = String(k ?? '').toLowerCase();
+            if (kl === t) { quality = 'exact'; break; }
+            if (!quality && kl.includes(t)) quality = 'partial';
+        }
+        if (quality) out.push({ entity, quality });
+    }
+    out.sort((a, b) => (a.quality === 'exact' ? -1 : 0) - (b.quality === 'exact' ? -1 : 0));
+    return out;
 }
 
 // Compass cells. N/E/S/W are cardinals; C is the center cell for

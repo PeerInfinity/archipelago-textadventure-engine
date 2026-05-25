@@ -25,6 +25,7 @@ const engine = new TextAdventureEngine(container, {
     managed: false,                  // true = wrapper drives state; false = engine auto-mutates
     discoveryMode: 'full',           // 'full' or 'discovered' (fog of war)
     messageHistoryLimit: 10,
+    autoFocusCommandInput: true,     // refocus the command input after every action
     dataPath: './data',              // where the picker looks for manifest.json
 });
 
@@ -78,6 +79,7 @@ engine.addInventoryItem(itemId, label, count?);
 engine.removeInventoryItem(itemId, count?);
 engine.displayMessage(text, kind?);  // kind: 'normal' | 'system' | 'error' | 'success'
 engine.setDiscoveryMode(mode);       // 'full' | 'discovered'
+engine.setOption(key, value);        // update one of the constructor options at runtime
 engine.batchUpdate(fn);              // suppress intermediate renders
 ```
 
