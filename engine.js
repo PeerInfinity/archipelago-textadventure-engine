@@ -612,19 +612,26 @@ export class TextAdventureEngine {
         html.push('<div class="tae-actions">');
         html.push(`<div class="tae-actions-title">${escapeHtml(room.title)}</div>`);
 
-        // Exits — assign flat-index shorthand labels (m, m1, m2…) to
-        // every exit shown as a real (non-???) link. Hidden exits and
-        // ??? placeholders don't enter the numbering so the indices
-        // visible to the player match what a parser will later see.
-        const visibleExits = (room.exits || []).filter(exit => this._isExitVisibleForShorthand(room.id, exit));
-        const exitItems = (room.exits || []).map(exit => {
-            const idx = visibleExits.indexOf(exit);
-            const shorthand = idx >= 0 ? formatFlatExitShorthand(idx, visibleExits.length) : null;
-            return this._renderExit(room.id, exit, shorthand);
-        }).filter(Boolean);
-        if (exitItems.length > 0) {
+        // Exits — when any exit carries a `side` field, render a 3×3
+        // compass grid (N/E/S/W cardinals + center cell C for
+        // null/unsided exits). Otherwise fall back to a flat list.
+        // ??? placeholders and hidden exits stay outside the
+        // numbering so visible indices match what the parser sees.
+        const useCompass = (room.exits || []).some(e => COMPASS_SIDES.includes(e?.side));
+        if (useCompass) {
             html.push('<div class="tae-actions-label">Exits:</div>');
-            html.push('<div class="tae-actions-list">' + exitItems.join(' · ') + '</div>');
+            html.push(this._renderExitsCompass(room));
+        } else {
+            const visibleExits = (room.exits || []).filter(exit => this._isExitVisibleForShorthand(room.id, exit));
+            const exitItems = (room.exits || []).map(exit => {
+                const idx = visibleExits.indexOf(exit);
+                const shorthand = idx >= 0 ? formatFlatExitShorthand(idx, visibleExits.length) : null;
+                return this._renderExit(room.id, exit, shorthand);
+            }).filter(Boolean);
+            if (exitItems.length > 0) {
+                html.push('<div class="tae-actions-label">Exits:</div>');
+                html.push('<div class="tae-actions-list">' + exitItems.join(' · ') + '</div>');
+            }
         }
 
         // Items — assign location shorthand (l, l1, l2…) to uncollected,
@@ -667,6 +674,33 @@ export class TextAdventureEngine {
         const exitDiscovered = exitSlot?.discovered ?? false;
         if (this.options.discoveryMode === 'discovered' && !exitDiscovered) return false;
         return true;
+    }
+
+    _renderExitsCompass(room) {
+        const cells = groupExitsBySide(room.exits || []);
+        // Per-cell shorthand uses each cell's own letter (n/e/s/w/c)
+        // with a 1-based index dropped when there's only one exit in
+        // that cell. Only visible exits enter the count so indices
+        // stay stable as discovery progresses.
+        const visibleByCell = {};
+        for (const cellId of COMPASS_CELLS) {
+            visibleByCell[cellId] = cells[cellId].filter(e => this._isExitVisibleForShorthand(room.id, e));
+        }
+        const html = ['<div class="tae-exits-grid">'];
+        for (const cellId of COMPASS_CELLS) {
+            html.push(`<div class="tae-exits-cell tae-exits-cell-${cellId.toLowerCase()}">`);
+            for (const exit of cells[cellId]) {
+                const idx = visibleByCell[cellId].indexOf(exit);
+                const shorthand = idx >= 0
+                    ? formatCellExitShorthand(cellId, idx, visibleByCell[cellId].length)
+                    : null;
+                const rendered = this._renderExit(room.id, exit, shorthand);
+                if (rendered) html.push(rendered);
+            }
+            html.push('</div>');
+        }
+        html.push('</div>');
+        return html.join('');
     }
 
     _isItemVisibleForShorthand(roomId, item) {
@@ -755,4 +789,29 @@ function formatFlatExitShorthand(i, total) {
 function formatLocationShorthand(i, total) {
     if (total <= 1) return 'l';
     return `l${i + 1}`;
+}
+
+// Compass cells. N/E/S/W are cardinals; C is the center cell for
+// exits whose `side` is null/missing/unknown (teleporters etc.).
+const COMPASS_CELLS = Object.freeze(['N', 'E', 'S', 'W', 'C']);
+// Sides recognised as compass directions; anything else falls into C.
+const COMPASS_SIDES = Object.freeze(['N', 'E', 'S', 'W']);
+const CELL_SHORTHAND_LETTER = Object.freeze({ N: 'n', E: 'e', S: 's', W: 'w', C: 'c' });
+
+// Bucket exits into compass cells. Preserves order within each cell.
+function groupExitsBySide(exits) {
+    const cells = { N: [], E: [], S: [], W: [], C: [] };
+    for (const exit of (exits || [])) {
+        const cell = exit && cells[exit.side] ? exit.side : 'C';
+        cells[cell].push(exit);
+    }
+    return cells;
+}
+
+// Shorthand for the i-th exit in a compass cell.
+function formatCellExitShorthand(cellId, i, total) {
+    const letter = CELL_SHORTHAND_LETTER[cellId];
+    if (!letter) return '';
+    if (total <= 1) return letter;
+    return `${letter}${i + 1}`;
 }

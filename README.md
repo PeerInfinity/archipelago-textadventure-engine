@@ -44,7 +44,11 @@ engine.loadWorld(myWorld);
       title: 'Forest Clearing',
       description: 'You are standing in a forest clearing...',
       exits: [
-        { id: 'north', label: 'north (to dark woods)', targetRoomId: 'dark-woods' },
+        // `side` is optional. When any exit in a room carries
+        // `side: 'N'|'E'|'S'|'W'`, the room renders as a 3×3 compass
+        // grid (exits without `side` go in the center cell). Without
+        // `side`, exits render as a flat list.
+        { id: 'north', label: 'north (to dark woods)', targetRoomId: 'dark-woods', side: 'N' },
       ],
       items: [
         { id: 'key', label: 'shiny brass key', description: 'A small brass key.' },
