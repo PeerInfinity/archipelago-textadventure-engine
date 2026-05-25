@@ -144,8 +144,11 @@ export class TextAdventureEngine {
         slot.collected = nextCollected;
         // First-time collection is the "discovery" moment in AP terms.
         // Emit a styled message highlighting the item's name so newly-
-        // found items visually pop in the scrollback.
-        if (!wasCollected && nextCollected) {
+        // found items visually pop in the scrollback. Skipped in
+        // managed mode — the wrapper owns message display there and
+        // may push a templated check message that includes {item}
+        // highlighted inline; a separate discovery line would duplicate.
+        if (!wasCollected && nextCollected && !this.options.managed) {
             const item = this.world?.rooms[roomId]?.items.find(i => i.id === itemId);
             if (item) {
                 this._queueMessage(
