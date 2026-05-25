@@ -113,6 +113,12 @@
 .tae-msg-system      { color: #8888cc; font-style: italic; }
 .tae-msg-error       { color: #cc8888; }
 .tae-msg-success     { color: #88cc88; }
+.tae-msg-discovery   { color: #cecece; }
+
+.tae-item-name {
+    color: #4da6ff;
+    font-weight: bold;
+}
 
 .tae-actions {
     margin-top: 16px;

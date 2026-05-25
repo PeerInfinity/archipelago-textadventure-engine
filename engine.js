@@ -138,7 +138,24 @@ export class TextAdventureEngine {
 
     setItemCollected(roomId, itemId, value) {
         const slot = this.state.items[roomId]?.[itemId];
-        if (slot) { slot.collected = !!value; this._queueRender(); }
+        if (!slot) return;
+        const wasCollected = !!slot.collected;
+        const nextCollected = !!value;
+        slot.collected = nextCollected;
+        // First-time collection is the "discovery" moment in AP terms.
+        // Emit a styled message highlighting the item's name so newly-
+        // found items visually pop in the scrollback.
+        if (!wasCollected && nextCollected) {
+            const item = this.world?.rooms[roomId]?.items.find(i => i.id === itemId);
+            if (item) {
+                this._queueMessage(
+                    `You discover: <span class="tae-item-name">${escapeHtml(item.label)}</span>`,
+                    'discovery',
+                    { html: true },
+                );
+            }
+        }
+        this._queueRender();
     }
 
     setItemAccessible(roomId, itemId, value) {
@@ -698,8 +715,11 @@ export class TextAdventureEngine {
 
     // ─── rendering ─────────────────────────────────────────────────
 
-    _queueMessage(text, kind = 'normal') {
-        this.messages.push({ text, kind });
+    _queueMessage(text, kind = 'normal', opts = {}) {
+        // `html: true` marks the entry as pre-escaped raw HTML so
+        // styled spans (e.g. discovered-item highlights) survive
+        // rendering. Defaults to plain text — escaped at render time.
+        this.messages.push({ text, kind, html: !!opts.html });
         const limit = this.options.messageHistoryLimit;
         if (this.messages.length > limit) {
             this.messages = this.messages.slice(-limit);
@@ -744,7 +764,8 @@ export class TextAdventureEngine {
         // Build the room view: messages history + exits + items
         const html = [];
         for (const m of this.messages) {
-            html.push(`<div class="tae-msg tae-msg-${m.kind}">${escapeHtml(m.text).replace(/\n/g, '<br>')}</div>`);
+            const body = m.html ? m.text : escapeHtml(m.text).replace(/\n/g, '<br>');
+            html.push(`<div class="tae-msg tae-msg-${m.kind}">${body}</div>`);
         }
 
         // Always show clickable exits + items panel at the bottom of the display
