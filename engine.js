@@ -173,6 +173,21 @@ export class TextAdventureEngine {
         if (slot) { slot.discovered = !!value; this._queueRender(); }
     }
 
+    /**
+     * Display arbitrary host-supplied status info in the engine's
+     * header bar. The engine is Archipelago-naive — it doesn't know
+     * what "mana" means; it just renders whatever HTML-safe text the
+     * host gives it. Pass null or an empty object to hide the bar.
+     *
+     * Recognised fields (all optional):
+     *   text  — plain-text status line (left side of the bar)
+     *   html  — pre-escaped HTML status line (replaces text if both)
+     */
+    setHeaderInfo(info) {
+        this._headerInfo = info && (info.text || info.html) ? info : null;
+        this._queueRender();
+    }
+
     setInventory(items) {
         this.state.inventory = {};
         for (const [id, entry] of Object.entries(items || {})) {
@@ -582,6 +597,12 @@ export class TextAdventureEngine {
         this.container.innerHTML = '';
         this.container.classList.add('tae-root');
 
+        // Host-driven header bar. Hidden by default; setHeaderInfo
+        // populates it (used by the wrapper for mana display).
+        this._headerEl = document.createElement('div');
+        this._headerEl.className = 'tae-header hidden';
+        this.container.appendChild(this._headerEl);
+
         this._mainEl = document.createElement('div');
         this._mainEl.className = 'tae-main';
         this.container.appendChild(this._mainEl);
@@ -742,6 +763,8 @@ export class TextAdventureEngine {
         const stickToBottom = this._displayEl
             ? (this._displayEl.scrollHeight - this._displayEl.scrollTop - this._displayEl.clientHeight) < 8
             : true;
+
+        this._renderHeader();
 
         if (!this.world || !this.state.currentRoomId) {
             this._displayEl.innerHTML = '<div class="tae-placeholder">No world loaded.</div>';
@@ -917,6 +940,18 @@ export class TextAdventureEngine {
         else cls.push('tae-link-accessible');
         const prefix = shorthand ? `<span class="tae-shorthand">[${escapeHtml(shorthand)}]</span> ` : '';
         return `<span class="${cls.join(' ')}" data-room-id="${escapeHtml(roomId)}" data-item-id="${escapeHtml(item.id)}">${prefix}${escapeHtml(item.label)}</span>`;
+    }
+
+    _renderHeader() {
+        if (!this._headerEl) return;
+        const info = this._headerInfo;
+        if (!info) {
+            this._headerEl.classList.add('hidden');
+            this._headerEl.innerHTML = '';
+            return;
+        }
+        this._headerEl.classList.remove('hidden');
+        this._headerEl.innerHTML = info.html ? info.html : escapeHtml(info.text);
     }
 
     _renderInventory() {

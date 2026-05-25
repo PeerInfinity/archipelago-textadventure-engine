@@ -14,6 +14,17 @@
     overflow: hidden;
 }
 
+.tae-header {
+    padding: 6px 12px;
+    background-color: #262626;
+    color: #cecece;
+    border-bottom: 1px solid #555;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.tae-header.hidden { display: none; }
+
 .tae-main {
     flex: 1;
     display: flex;

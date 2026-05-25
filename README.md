@@ -79,6 +79,7 @@ engine.addInventoryItem(itemId, label, count?);
 engine.removeInventoryItem(itemId, count?);
 engine.displayMessage(text, kind?);  // kind: 'normal' | 'system' | 'error' | 'success'
 engine.setDiscoveryMode(mode);       // 'full' | 'discovered'
+engine.setHeaderInfo({text});        // populate the header bar (e.g. "mana: 5.0 / 10.0"); pass null to hide
 engine.setOption(key, value);        // update one of the constructor options at runtime
 engine.batchUpdate(fn);              // suppress intermediate renders
 ```
