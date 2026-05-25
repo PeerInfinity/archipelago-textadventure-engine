@@ -270,7 +270,10 @@ export class TextAdventureEngine {
         }
         const accessible = this.state.exits[roomId]?.[exitId]?.accessible ?? true;
         if (!accessible && !opts.ignoreAccessibility) {
-            this.displayMessage(`You can't go that way: ${exit.label}.`, 'error');
+            this._emit('command:moveBlocked', { fromRoomId: roomId, exitId, targetRoomId: exit.targetRoomId, reason: 'inaccessible' });
+            if (!this.options.managed) {
+                this.displayMessage(`You can't go that way: ${exit.label}.`, 'error');
+            }
             return;
         }
         this._emit('command:move', { fromRoomId: roomId, exitId, targetRoomId: exit.targetRoomId });
@@ -331,18 +334,32 @@ export class TextAdventureEngine {
             return;
         }
         const slot = this.state.items[roomId]?.[itemId];
-        if (!(slot?.accessible ?? true) && !opts.ignoreAccessibility) {
-            this.displayMessage(`You can't interact with that: ${item.label}.`, 'error');
+        const accessible = slot?.accessible ?? true;
+        if (!accessible && !opts.ignoreAccessibility) {
+            // Managed wrappers can format their own templated
+            // inaccessible message; the engine only displays the
+            // generic one in standalone mode.
+            this._emit('command:examineBlocked', { roomId, itemId, reason: 'inaccessible' });
+            if (!this.options.managed) {
+                this.displayMessage(`You can't interact with that: ${item.label}.`, 'error');
+            }
             return;
         }
         if (slot?.collected) {
-            this.displayMessage(`${item.label}: already examined.`, 'system');
+            this._emit('command:examineBlocked', { roomId, itemId, reason: 'collected' });
+            if (!this.options.managed) {
+                this.displayMessage(`${item.label}: already examined.`, 'system');
+            }
             return;
         }
         this._emit('command:examine', { roomId, itemId });
         this.batchUpdate(() => {
-            this.displayMessage(item.description || item.label, 'normal');
+            // Managed mode: wrapper pushes the (possibly templated)
+            // examination message itself via displayMessage. Standalone
+            // mode: engine shows the item's bundled description and
+            // mutates state directly.
             if (!this.options.managed) {
+                this.displayMessage(item.description || item.label, 'normal');
                 this.setItemDiscovered(roomId, itemId, true);
                 this.setItemCollected(roomId, itemId, true);
             }
@@ -778,9 +795,15 @@ export class TextAdventureEngine {
         }
 
         // Add room-description on first render of each new room.
-        // Detect by comparing rendered room id to current.
+        // Detect by comparing rendered room id to current. Skip in
+        // managed mode — the wrapper pushes its own (possibly
+        // templated) enter message via displayMessage before
+        // setCurrentRoom, so the engine doesn't need to add a generic
+        // line that would duplicate or replace the wrapper's prose.
         if (this._lastRenderedRoomId !== this.state.currentRoomId) {
-            this._describeRoom(room, { force: false });
+            if (!this.options.managed) {
+                this._describeRoom(room, { force: false });
+            }
             this._lastRenderedRoomId = this.state.currentRoomId;
         }
 
