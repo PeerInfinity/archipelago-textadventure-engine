@@ -217,8 +217,12 @@ export class TextAdventureEngine {
         this._queueRender();
     }
 
-    displayMessage(text, kind = 'normal') {
-        this._queueMessage(text, kind);
+    displayMessage(text, kind = 'normal', opts = {}) {
+        // opts.html = true marks `text` as pre-escaped raw HTML so
+        // styled spans (e.g. wrapper-side templated discoveries with
+        // <span class="tae-item-name">…</span> inline) survive the
+        // render pass intact. Without it the text is HTML-escaped.
+        this._queueMessage(text, kind, opts);
         this._queueRender();
     }
 
