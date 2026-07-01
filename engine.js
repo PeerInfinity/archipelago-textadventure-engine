@@ -4,8 +4,8 @@
  * (loads bundled sample worlds, auto-mutates state) and from a wrapper
  * (managed mode: emits events, wrapper drives state).
  *
- * See NewDocs/plans/procedural-generation/textadventure-engine-spec.md
- * for the contract.
+ * The wrapper-side integration is documented in the consuming repo at
+ * docs/json/developer/procgen/text-adventure.md.
  */
 
 const DEFAULT_OPTIONS = Object.freeze({
