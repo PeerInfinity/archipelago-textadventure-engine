@@ -4,6 +4,8 @@ A small, dependency-free JavaScript text adventure engine. Renders rooms, accept
 
 This engine is intentionally Archipelago-naive — it knows nothing about regions, items-as-AP-checks, sidecars, or any other randomizer concept. It can be driven by [Archipelago-CC](https://github.com/PeerInfinity/Archipelago-CC)'s `textAdventureSubstrateWrapper` (which translates Archipelago state into engine API calls), or run entirely on its own.
 
+**AI disclosure:** The code and documentation in this repository are predominantly AI-generated, written with [Claude Code](https://claude.ai/code), as part of the [Archipelago-CC](https://github.com/PeerInfinity/Archipelago-CC) project.
+
 ## Quick start (standalone)
 
 Serve the directory with any static-file server:
