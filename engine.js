@@ -992,6 +992,10 @@ export class TextAdventureEngine {
             return `<span class="tae-link tae-link-unknown" data-room-id="${escapeHtml(roomId)}" data-action="explore">an unfamiliar item</span>`;
         }
         const cls = ['tae-link', 'tae-link-item'];
+        // An item may name its `kind` (a host's word for what it is: e.g. a
+        // thing that is looked at rather than collected). It is drawn as a
+        // class, `tae-item-kind-<kind>`, and changes nothing else.
+        if (typeof item.kind === 'string' && /^[a-z][a-z0-9-]*$/.test(item.kind)) cls.push(`tae-item-kind-${item.kind}`);
         if (slot.collected) cls.push('tae-link-collected');
         else if (!slot.accessible) cls.push('tae-link-inaccessible');
         else cls.push('tae-link-accessible');

@@ -55,6 +55,8 @@ engine.loadWorld(myWorld);
       ],
       items: [
         { id: 'key', label: 'shiny brass key', description: 'A small brass key.' },
+        // optional `kind` (lowercase letters, digits, '-'): drawn as the class tae-item-kind-<kind>
+        { id: 'sign', label: 'a sign', kind: 'info' },
       ],
     },
     // ... more rooms

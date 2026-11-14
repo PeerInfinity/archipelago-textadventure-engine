@@ -169,6 +169,9 @@
 .tae-link-explore      { color: #d4af37; font-weight: bold; }
 .tae-link-unknown      { color: #999; font-style: italic; }
 
+/* An item with a `kind` (see README): drawn apart from a plain item. */
+.tae-link-item[class*="tae-item-kind-"].tae-link-accessible { color: #88aadd; font-style: italic; }
+
 .tae-shorthand {
     color: #888;
     text-decoration: none;
